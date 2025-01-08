@@ -11,6 +11,9 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       'process.env': env
+    },
+    build: {
+      outDir: 'build'  // 修改输出目录
     }
   }
 })
