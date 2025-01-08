@@ -3,21 +3,27 @@ import router from './routes'
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { Toaster } from 'react-hot-toast'
-
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
+import { Session } from '@supabase/supabase-js'
 
 function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // 检查用户是否已经登录
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setLoading(false)
-    })
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        setLoading(false)
+      } catch (error) {
+        console.error('Error checking session:', error)
+        setLoading(false)
+      }
+    }
 
-    // 监听认证状态变化
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    checkSession()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
       console.log('Auth state changed:', event)
     })
 
