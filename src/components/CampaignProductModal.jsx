@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
 import { supabase } from '../lib/supabaseClient'  // 修正后的路径
 import 'react-toastify/dist/ReactToastify.css'
+import imageCompression from 'browser-image-compression'  // 添加导入
 
 
 export default function CampaignProductModal({ isOpen, onClose, onSubmit, initialData }) {
@@ -11,6 +12,7 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
     price: '',
     originalPrice: '',
     image: null,
+    previewUrl: null,
     purchaseLink: initialData?.purchaseLink || '',  // 修改字段名
     inquiryLink: initialData?.inquiryLink || '',    // 修改字段名
     is_recommended: false
@@ -79,77 +81,82 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
         name: initialData.name || '',
         originalPrice: initialData.original_price || '',
         price: initialData.price || '',
-        image: initialData.image_url || null,
+        image: null,
+        previewUrl: initialData.image_url || null,
         purchaseLink: initialData.purchase_link || '',
         inquiryLink: initialData.inquiry_link || '',
         is_recommended: initialData.is_recommended || false
       })
+      setPreviewImage(initialData.image_url)
+    } else {
+      setFormData({
+        name: '',
+        originalPrice: '',
+        price: '',
+        image: null,
+        previewUrl: null,
+        purchaseLink: '',
+        inquiryLink: '',
+        is_recommended: false
+      })
+      setPreviewImage(null)
     }
     setErrors({})
   }, [initialData, isOpen])
 
+  // 添加图片压缩函数
+  const compressImage = async (file) => {
+    const options = {
+      maxSizeMB: 1,
+      maxWidthOrHeight: 1024,
+      useWebWorker: true
+    }
+    
+    try {
+      const compressedFile = await imageCompression(file, options)
+      return compressedFile
+    } catch (error) {
+      console.error('图片压缩失败:', error)
+      throw new Error('图片压缩失败')
+    }
+  }
+
+  // 添加文件大小限制常量
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB in bytes
+
+  // 添加本地预览图片状态
+  const [previewImage, setPreviewImage] = useState(null)
+
+  // 修改图片上传处理函数
   const handleImageUpload = async (e) => {
     const file = e.target.files[0]
-    
-    // 检查文件是否存在
-    if (!file) {
-      toast.error('请选择要上传的图片文件')
-      return
-    }
-  
-    // 检查文件类型
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('仅支持 JPG, PNG, WEBP 格式的图片')
-      return
-    }
-  
-    // 检查文件大小
-    const maxSize = 2 * 1024 * 1024 // 2MB
-    if (file.size > maxSize) {
-      toast.error('图片大小不能超过 2MB')
-      return
-    }
-  
-    // 显示上传中提示
-    const toastId = toast.loading('图片上传中...')
-  
-    try {
-      // 上传文件到 Supabase
-      const fileName = `${Date.now()}-${file.name}`
-      const { error: uploadError } = await supabase.storage
-        .from('featured-products')
-        .upload(fileName, file)
-  
-      if (uploadError) throw uploadError
-  
-      // 获取文件公开URL
-      const { data: urlData } = supabase.storage
-        .from('featured-products')
-        .getPublicUrl(fileName)
-  
-      // 更新表单数据
-      setFormData(prev => ({
-        ...prev,
-        image: urlData.publicUrl
-      }))
-  
-      // 更新 toast 提示
-      toast.update(toastId, {
-        render: '图片上传成功',
-        type: 'success',
-        isLoading: false,
-        autoClose: 4000
-      })
-  
-    } catch (error) {
-      // 错误处理
-      toast.update(toastId, {
-        render: `上传失败: ${error.message}`,
-        type: 'error',
-        isLoading: false,
-        autoClose: 5000
-      })
+    if (file) {
+      try {
+        // 检查文件大小
+        if (file.size > MAX_FILE_SIZE) {
+          toast.error('图片大小不能超过5MB')
+          e.target.value = ''
+          return
+        }
+
+        // 创建本地预览
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const previewUrl = reader.result
+          setPreviewImage(previewUrl)
+          setFormData(prev => ({
+            ...prev,
+            image: file,
+            previewUrl: previewUrl
+          }))
+        }
+        reader.readAsDataURL(file)
+        
+        setErrors(prev => ({ ...prev, image: null }))
+      } catch (error) {
+        toast.error(error.message || '图片处理失败')
+        e.target.value = ''
+      }
     }
   }
   
@@ -173,82 +180,59 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    console.log('[调试] 开始提交表单')
+    setIsLoading(true)
 
     try {
-      console.log('[调试] 开始数据验证')
-      const requiredFields = ['name', 'price', 'purchaseLink', 'inquiryLink']
-      const isValid = requiredFields.every(field => {
-        const value = formData[field]
-        if (!value || (typeof value === 'string' && value.trim() === '')) {
-          console.log(`[调试] 验证失败: ${field} 为空`)
-          setErrors(prev => ({...prev, [field]: '该字段为必填项'}))
-          return false
-        }
-        return true
-      })
+      // 验证必填字段...
 
-      if (!isValid) {
-        console.log('[调试] 验证失败，存在必填项为空')
-        toast.error('请填写所有必填项', {
-          position: 'top-center',
-          duration: 4000
-        })
-        return
+      // 处理图片上传
+      let imageUrl = formData.image
+      if (formData.image && formData.image instanceof File) {
+        try {
+          // 压缩图片
+          const compressedFile = await compressImage(formData.image)
+          
+          // 上传到 Supabase Storage
+          const fileExt = formData.image.name.split('.').pop()
+          const fileName = `${Date.now()}.${fileExt}`
+          const filePath = `campaign-images/${fileName}`
+
+          const { error: uploadError } = await supabase.storage
+            .from('campaign-images')
+            .upload(filePath, compressedFile)
+
+          if (uploadError) throw uploadError
+
+          // 获取公共URL
+          const { data: { publicUrl } } = supabase.storage
+            .from('campaign-images')
+            .getPublicUrl(filePath)
+
+          imageUrl = publicUrl
+        } catch (error) {
+          throw new Error(`图片上传失败: ${error.message}`)
+        }
       }
 
-      console.log('[调试] 准备提交数据')
+      // 准备提交数据
       const productData = {
         name: String(formData.name).trim(),
-        original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
         price: parseFloat(formData.price),
-        image_url: formData.image,
+        original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
+        image_url: imageUrl,
         purchase_link: String(formData.purchaseLink).trim(),
         inquiry_link: String(formData.inquiryLink).trim(),
         is_recommended: formData.is_recommended,
-        created_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
       }
 
-      console.log('[调试] 准备提交的数据:', JSON.stringify(productData, null, 2))
-
-      console.log('[调试] 开始数据库操作')
-      setIsLoading(true)
-      toast.loading('正在保存商品...', {
-        position: 'top-center',
-        duration: 2000
-      })
-      
-      const { data, error } = await supabase
-        .from('campaign_products')
-        .insert([productData])
-        .select('*')
-
-      if (error) {
-        console.error('[调试] 数据库操作失败:', error)
-        throw error
-      }
-
-      if (!data || data.length === 0) {
-        console.error('[调试] 操作成功但未返回数据')
-        throw new Error('操作成功但未返回数据')
-      }
-
-      console.log('[调试] 操作成功，返回数据:', data[0])
-      toast.success('商品添加成功', {
-        position: 'top-center',
-        duration: 4000
-      })
-      onSubmit(data[0])
+      // 提交数据
+      onSubmit(productData)
     } catch (error) {
-      console.error('[调试] 保存失败:', error)
-      toast.error(`保存失败: ${error.message}`, {
-        position: 'top-center',
-        duration: 5000
-      })
+      console.error('保存失败:', error)
+      toast.error(error.message || '操作失败，请重试')
     } finally {
-      console.log('[调试] 提交流程结束')
       setIsLoading(false)
-      toast.dismiss()
     }
   }
   
@@ -365,33 +349,38 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
           {/* 图片上传 */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              商品图片<span className="text-red-500">*</span>
+              商品图片
             </label>
-            <div className="mt-1 flex items-center">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                className="hidden"
-                id="image-upload"
-              />
-              <label
-                htmlFor="image-upload"
-                className="cursor-pointer px-4 py-2 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-1 focus:ring-black"
-              >
-                选择图片
-              </label>
-              
-              {formData.image && (
-                <img
-                  src={formData.image}
-                  alt="预览"
-                  className="ml-4 w-20 h-20 object-cover rounded-md"
+            <div className="mt-1 flex flex-col space-y-2">
+              <div className="flex items-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                  id="campaign-image-upload"
                 />
-              )}
-              
+                <label
+                  htmlFor="campaign-image-upload"
+                  className="cursor-pointer px-4 py-2 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-1 focus:ring-black"
+                >
+                  选择图片
+                </label>
+                {(formData.previewUrl || initialData?.image_url) && (
+                  <img
+                    src={formData.previewUrl || initialData?.image_url}
+                    alt="预览"
+                    className="ml-4 w-20 h-20 object-cover rounded-md"
+                  />
+                )}
+              </div>
+              <div className="text-sm text-gray-500">
+                <p>• 支持 jpg、png 格式</p>
+                <p>• 图片大小不能超过 5MB</p>
+                <p>• 建议尺寸：1024×1024px</p>
+                <p>• 大图片将自动压缩以提高上传速度</p>
+              </div>
             </div>
-            <span className="text-gray-500 ml-2">(支持 JPG, PNG, WEBP 格式，最大 2MB)</span>
           </div>
 
 

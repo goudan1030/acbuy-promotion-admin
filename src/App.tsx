@@ -1,13 +1,12 @@
+import React, { useEffect, useState } from 'react'
 import { RouterProvider } from 'react-router-dom'
 import router from './routes'
-import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabaseClient'
-import { Toaster } from 'react-hot-toast'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import { Session } from '@supabase/supabase-js'
 
-function App() {
+const App: React.FC = () => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {

@@ -82,6 +82,43 @@ export default function Category() {
   // 分页处理
   const paginate = (pageNumber) => setCurrentPage(pageNumber)
 
+  // 添加商品更新处理函数
+  const handleProductUpdate = async (updatedProduct) => {
+    try {
+      setLoading(true)
+      // 刷新商品列表
+      const data = selectedCategory === 'all' 
+        ? await getProducts()
+        : await getProductsByCategory(selectedCategory)
+      
+      setProducts(data)
+      toast.success('商品更新成功')
+    } catch (error) {
+      console.error('更新商品列表失败:', error)
+      toast.error('更新商品列表失败')
+    } finally {
+      setLoading(false)
+      setIsModalOpen(false)
+      setEditingProduct(null)
+    }
+  }
+
+  const handleEdit = (product) => {
+    console.log('开始编辑商品:', product)
+    setEditingProduct({
+      id: product.id,  // 确保包含 id
+      name: product.name || '',
+      category: product.category || '',
+      original_price: product.original_price || '',
+      current_price: product.current_price || '',
+      image_url: product.image_url || null,
+      recommendation: product.recommendation || '',
+      purchase_link: product.purchase_link || '',
+      inquiry_link: product.inquiry_link || ''
+    })
+    setIsModalOpen(true)
+  }
+
   return (
     <div className="h-[calc(100vh-20rem)] flex flex-col">
       <div className="flex-1 p-6">
@@ -181,10 +218,7 @@ export default function Category() {
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-4">
                             <button
-                              onClick={() => {
-                                setEditingProduct(product)
-                                setIsModalOpen(true)
-                              }}
+                              onClick={() => handleEdit(product)}
                               className="text-gray-500 hover:text-gray-700 focus:outline-none"
                               title="编辑"
                             >
@@ -232,19 +266,17 @@ export default function Category() {
         </div>
       </div>
 
-      <ProductModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false)
-          setEditingProduct(null)
-        }}
-        onSubmit={() => {
-          setIsModalOpen(false)
-          handleCategoryChange(selectedCategory)
-        }}
-        initialData={editingProduct}
-        categories={categories}
-      />
+      {isModalOpen && (
+        <ProductModal
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false)
+            setEditingProduct(null)
+          }}
+          onSubmit={handleProductUpdate}
+          initialData={editingProduct}
+        />
+      )}
 
       <ToastContainer
         position="top-center"

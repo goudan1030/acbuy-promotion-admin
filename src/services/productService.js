@@ -85,3 +85,56 @@ export const deleteProduct = async (productId) => {
     throw error
   }
 }
+
+// 更新商品
+export const updateProduct = async (productId, productData) => {
+  try {
+    console.log('开始更新商品:', { productId, productData })
+
+    // 1. 先检查商品是否存在
+    const { data: existingProduct, error: checkError } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', productId)
+
+    if (checkError) {
+      console.error('检查商品失败:', checkError)
+      throw new Error(`检查商品失败: ${checkError.message}`)
+    }
+
+    if (!existingProduct || existingProduct.length === 0) {
+      throw new Error(`商品不存在: ${productId}`)
+    }
+
+    console.log('找到现有商品:', existingProduct[0])
+
+    // 2. 执行更新
+    const updatePayload = {
+      ...productData,
+      updated_at: new Date().toISOString()
+    }
+
+    console.log('更新数据:', updatePayload)
+
+    const { data, error } = await supabase
+      .from('products')
+      .update(updatePayload)
+      .eq('id', productId)
+      .select()
+
+    if (error) {
+      console.error('更新失败:', error)
+      throw new Error(`更新失败: ${error.message}`)
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error('更新后未返回数据')
+    }
+
+    console.log('更新成功:', data[0])
+    return data[0]
+  } catch (error) {
+    console.error('更新商品失败:', error)
+    throw error
+  }
+}

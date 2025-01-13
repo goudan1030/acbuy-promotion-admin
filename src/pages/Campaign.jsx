@@ -10,6 +10,7 @@ export default function Campaign() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
+  const [editingProduct, setEditingProduct] = useState(null)
 
   // 获取投放商品
   const getCampaignProducts = async () => {
@@ -78,6 +79,83 @@ export default function Campaign() {
   const indexOfFirstItem = indexOfLastItem - itemsPerPage
   const currentItems = products.slice(indexOfFirstItem, indexOfLastItem)
 
+  // 添加商品更新处理函数
+  const handleProductUpdate = async (updatedProduct) => {
+    try {
+      setLoading(true)
+      toast.loading('正在更新商品...', {
+        position: 'top-center',
+        duration: 2000
+      })
+
+      if (editingProduct?.id) {
+        // 更新现有商品
+        const { error } = await supabase
+          .from('campaign_products')
+          .update({
+            name: updatedProduct.name,
+            price: updatedProduct.price,
+            original_price: updatedProduct.original_price,
+            image_url: updatedProduct.image_url,
+            purchase_link: updatedProduct.purchase_link,
+            inquiry_link: updatedProduct.inquiry_link,
+            is_recommended: updatedProduct.is_recommended,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingProduct.id)
+
+        if (error) throw error
+      } else {
+        // 新增商品
+        const { error } = await supabase
+          .from('campaign_products')
+          .insert([{
+            ...updatedProduct,
+            created_at: new Date().toISOString()
+          }])
+
+        if (error) throw error
+      }
+
+      // 刷新商品列表
+      await getCampaignProducts()
+      
+      toast.success(`商品${editingProduct ? '更新' : '添加'}成功`, {
+        position: 'top-center',
+        duration: 4000
+      })
+      
+      // 关闭模态框
+      setIsModalOpen(false)
+      setEditingProduct(null)
+    } catch (error) {
+      console.error('商品操作失败:', error)
+      toast.error(`操作失败: ${error.message}`, {
+        position: 'top-center',
+        duration: 5000
+      })
+    } finally {
+      setLoading(false)
+      toast.dismiss()
+    }
+  }
+
+  // 修改编辑处理函数，确保所有必要字段都被正确传递
+  const handleEdit = (product) => {
+    setEditingProduct({
+      id: product.id,
+      name: product.name || '',
+      price: product.price || '',
+      original_price: product.original_price || '',
+      image_url: product.image_url || null,
+      purchase_link: product.purchase_link || '',
+      inquiry_link: product.inquiry_link || '',
+      is_recommended: product.is_recommended || false,
+      description: product.description || '' // 如果有描述字段的话
+    })
+    setIsModalOpen(true)
+  }
+
   return (
     <div className="h-[calc(100vh-20rem)] flex flex-col">
       <div className="flex-1 p-6">
@@ -106,50 +184,68 @@ export default function Campaign() {
                 </tr>
               </thead>
               <tbody>
-              {currentItems.map(product => (
-  <tr key={product.id} className="border-b hover:bg-gray-50">
-    <td className="px-6 py-4 text-sm text-gray-900">
-      <div className="flex items-center">
-        {product.image_url && (
-          <img
-            src={product.image_url}
-            alt={product.name}
-            className="w-10 h-10 rounded-full object-cover mr-4"
-          />
-        )}
-        <div>
-          <div>{product.name}</div>
-          <div className="text-xs text-gray-500">{product.description}</div>
-        </div>
-      </div>
-    </td>
-    <td className="px-6 py-4 text-sm text-gray-900">
-      <div>¥{product.price}</div>
-      {product.original_price && (
-        <div className="text-xs text-gray-500 line-through">¥{product.original_price}</div>
-      )}
-    </td>
-    <td className="px-6 py-4 text-sm text-gray-900">
-      {product.is_recommended ? (
-        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-          推荐
-        </span>
-      ) : (
-        <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800">
-          普通
-        </span>
-      )}
-    </td>
-    <td className="px-6 py-4 text-sm text-gray-900">
-      <button
-        className="text-red-600 hover:text-red-900"
-        onClick={() => handleDelete(product.id)}
-      >
-        移除
-      </button>
-    </td>
-  </tr>
-))}
+                {currentItems.map(product => (
+                  <tr key={product.id} className="border-b">
+                    <td className="px-6 py-4 text-sm">
+                      <div className="flex items-center">
+                        {product.image_url && (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-12 h-12 object-cover rounded mr-3"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium">{product.name}</div>
+                          {product.is_recommended && (
+                            <span className="text-xs bg-black text-white px-2 py-1 rounded mt-1 inline-block">
+                              推荐
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      <div>
+                        <div className="text-gray-900">¥{product.price}</div>
+                        {product.original_price && (
+                          <div className="text-gray-500 line-through text-xs">
+                            ¥{product.original_price}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        product.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {product.status === 'active' ? '已上架' : '已下架'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={() => handleEdit(product)}
+                          className="text-gray-600 hover:text-gray-900"
+                          title="编辑"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(product.id)}
+                          className="text-red-600 hover:text-red-900"
+                          title="删除"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -180,11 +276,12 @@ export default function Campaign() {
       {isModalOpen && (
         <CampaignProductModal
           isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          onSubmit={(newProduct) => {
-            setProducts(prev => [newProduct, ...prev])
+          onClose={() => {
             setIsModalOpen(false)
+            setEditingProduct(null)
           }}
+          onSubmit={handleProductUpdate}
+          initialData={editingProduct}
         />
       )}
     </div>
