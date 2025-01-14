@@ -1,55 +1,198 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
-import { supabase } from '../lib/supabaseClient'
-import { updateProduct } from '../services/productService'
+import { uploadImage, deleteImage } from '../services/imageService'
 import imageCompression from 'browser-image-compression'
 
-export default function ProductModal({ isOpen, onClose, onSubmit, initialData }) {
+// 添加 cleanUrl 函数定义（放在组件外部）
+const cleanUrl = (url) => {
+  if (!url) return ''
+  return url.replace(/['"]/g, '')
+}
+
+export default function ProductModal({ isOpen, onClose, onSubmit, initialData, mode = 'default' }) {
   const [formData, setFormData] = useState({
     name: '',
     category: '',
-    originalPrice: '',
     currentPrice: '',
-    image: null,
+    originalPrice: '',
+    imageId: null,
+    imageUrl: '',
     previewUrl: null,
-    recommendation: '',
-    purchaseLink: '',
-    inquiryLink: ''
+    qcImageId: null,
+    qcImageUrl: '',
+    qcPreviewUrl: null,
+    purchaseLink: ''
   })
 
+  // 新增：临时文件状态
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [selectedQCFile, setSelectedQCFile] = useState(null)
   const [errors, setErrors] = useState({})
   const [isLoading, setIsLoading] = useState(false)
 
   // 初始化表单数据
   useEffect(() => {
     if (initialData) {
+      console.log('初始化数据:', initialData) // 调试日志
       setFormData({
         name: initialData.name || '',
         category: initialData.category || '',
-        originalPrice: initialData.original_price || '',
         currentPrice: initialData.current_price || '',
-        image: null,
-        previewUrl: initialData.image_url || null,
-        recommendation: initialData.recommendation || '',
-        purchaseLink: initialData.purchase_link || '',
-        inquiryLink: initialData.inquiry_link || ''
+        originalPrice: initialData.original_price || '',
+        imageId: initialData.image_id || null,
+        imageUrl: initialData.image_url || '', // 添加 image_url
+        previewUrl: initialData.image?.public_url || null,
+        qcImageId: initialData.qc_image_id || null,
+        qcImageUrl: initialData.qc_image_url || '', // 添加 qc_image_url
+        qcPreviewUrl: initialData.qc_image?.public_url || null,
+        purchaseLink: initialData.purchase_link || ''
       })
-    } else {
-      // 重置表单数据
-      setFormData({
-        name: '',
-        category: '',
-        originalPrice: '',
-        currentPrice: '',
-        image: null,
-        previewUrl: null,
-        recommendation: '',
-        purchaseLink: '',
-        inquiryLink: ''
-      })
+      // 清除之前可能存在的临时文件
+      setSelectedFile(null)
+      setSelectedQCFile(null)
     }
-    setErrors({})
-  }, [initialData, isOpen])
+  }, [initialData])
+
+  // 修改图片选择处理函数
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    // 检查文件大小
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('图片大小不能超过5MB')
+      return
+    }
+
+    // 检查文件类型
+    if (!file.type.startsWith('image/')) {
+      toast.error('请上传图片文件')
+      return
+    }
+
+    // 创建本地预览URL
+    const previewUrl = URL.createObjectURL(file)
+    
+    // 保存文件和更新预览
+    setSelectedFile(file)
+    setFormData(prev => ({
+      ...prev,
+      previewUrl: previewUrl
+    }))
+  }
+
+  // 添加 QC 图片选择处理函数
+  const handleQCImageSelect = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    // 检查文件大小
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('图片大小不能超过5MB')
+      return
+    }
+
+    // 检查文件类型
+    if (!file.type.startsWith('image/')) {
+      toast.error('请上传图片文件')
+      return
+    }
+
+    // 创建本地预览URL
+    const previewUrl = URL.createObjectURL(file)
+    
+    // 保存文件和更新预览
+    setSelectedQCFile(file)
+    setFormData(prev => ({
+      ...prev,
+      qcPreviewUrl: previewUrl
+    }))
+  }
+
+  // 处理表单提交
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    
+    // 表单验证
+    const errors = {}
+    if (!formData.name?.trim()) errors.name = '请输入商品名称'
+    if (!formData.category?.trim()) errors.category = '请选择商品分类'
+    if (!formData.currentPrice) errors.currentPrice = '请输入商品价格'
+    if (!formData.purchaseLink?.trim()) errors.purchaseLink = '请输入购买链接'
+    
+    if (Object.keys(errors).length > 0) {
+      setErrors(errors)
+      return
+    }
+
+    setIsLoading(true)
+    const toastId = toast.loading('正在保存...')
+
+    try {
+      let imageId = formData.imageId
+      let qcImageId = formData.qcImageId
+      let imageUrl = formData.imageUrl
+      let qcImageUrl = formData.qcImageUrl
+
+      // 处理商品图片
+      if (selectedFile) {
+        const compressedFile = await compressImage(selectedFile)
+        const imageData = await uploadImage(compressedFile)
+        imageId = imageData.id
+        imageUrl = null // 如果上传了新图片，清除URL
+      }
+
+      // 处理QC图片
+      if (selectedQCFile) {
+        const compressedQCFile = await compressImage(selectedQCFile)
+        const qcImageData = await uploadImage(compressedQCFile)
+        qcImageId = qcImageData.id
+        qcImageUrl = null // 如果上传了新图片，清除URL
+      }
+
+      const productData = {
+        name: formData.name.trim(),
+        category: formData.category.trim(),
+        current_price: formData.currentPrice,
+        image_id: imageId,
+        image_url: cleanUrl(imageUrl),
+        qc_image_id: qcImageId,
+        qc_image_url: cleanUrl(qcImageUrl),
+        purchase_link: formData.purchaseLink?.trim()
+      }
+
+      await onSubmit(productData)
+      
+      toast.success('保存成功')
+
+      // 清理临时文件
+      if (selectedFile && formData.previewUrl) {
+        URL.revokeObjectURL(formData.previewUrl)
+      }
+      if (selectedQCFile && formData.qcPreviewUrl) {
+        URL.revokeObjectURL(formData.qcPreviewUrl)
+      }
+      
+      onClose()
+    } catch (error) {
+      console.error('保存失败:', error)
+      toast.error(`保存失败: ${error.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // 清理函数
+  useEffect(() => {
+    return () => {
+      if (formData.previewUrl && !formData.imageId) {
+        URL.revokeObjectURL(formData.previewUrl)
+      }
+      if (formData.qcPreviewUrl && !formData.qcImageId) {
+        URL.revokeObjectURL(formData.qcPreviewUrl)
+      }
+    }
+  }, [formData.previewUrl, formData.imageId, formData.qcPreviewUrl, formData.qcImageId])
 
   const compressImage = async (file) => {
     const options = {
@@ -69,153 +212,89 @@ export default function ProductModal({ isOpen, onClose, onSubmit, initialData })
 
   const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB in bytes
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0]
-    if (file) {
-      try {
-        // 检查文件大小
-        if (file.size > MAX_FILE_SIZE) {
-          toast.error('图片大小不能超过5MB')
-          e.target.value = ''
-          return
-        }
-
-        // 创建本地预览
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const previewUrl = reader.result
-          setFormData(prev => ({
-            ...prev,
-            image: file,
-            previewUrl: previewUrl
-          }))
-        }
-        reader.readAsDataURL(file)
-        
-        setErrors(prev => ({ ...prev, image: null }))
-      } catch (error) {
-        toast.error(error.message || '图片处理失败')
-        e.target.value = ''
-      }
-    }
-  }
-
+  // 添加字段验证函数
   const validateField = (field, value) => {
-    if (!value || (field === 'currentPrice' && isNaN(value))) {
-      setErrors(prev => ({ ...prev, [field]: '此项为必填项' }))
-    } else {
-      setErrors(prev => ({ ...prev, [field]: null }))
-    }
-  }
-
-  const handleBlur = (field) => (e) => {
-    validateField(field, e.target.value || formData[field])
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setIsLoading(true)
+    let error = null
     
+    switch (field) {
+      case 'name':
+        if (!value?.trim()) error = '请输入商品名称'
+        break
+      case 'category':
+        if (!value?.trim()) error = '请选择商品分类'
+        break
+      case 'currentPrice':
+        if (!value || isNaN(value)) error = '请输入有效的价格'
+        break
+      case 'purchaseLink':
+        if (!value?.trim()) error = '请输入购买链接'
+        else if (!isValidUrl(value)) error = '请输入有效的URL'
+        break
+      case 'inquiryLink':
+        if (!value?.trim()) error = '请输入咨询链接'
+        else if (!isValidUrl(value)) error = '请输入有效的URL'
+        break
+      default:
+        break
+    }
+
+    setErrors(prev => ({
+      ...prev,
+      [field]: error
+    }))
+  }
+
+  // 添加 URL 验证函数
+  const isValidUrl = (url) => {
     try {
-      // 1. 数据验证
-      const requiredFields = ['name', 'category', 'currentPrice', 'purchaseLink', 'inquiryLink']
-      const isValid = requiredFields.every(field => {
-        const value = formData[field]
-        if (!value || (typeof value === 'string' && value.trim() === '')) {
-          setErrors(prev => ({...prev, [field]: '该字段为必填项'}))
-          return false
-        }
-        return true
-      })
-
-      if (!isValid) {
-        toast.error('请填写所有必填项')
-        return
-      }
-
-      // 2. 处理图片上传
-      let imageUrl = formData.image
-      if (formData.image && typeof formData.image !== 'string') {
-        const file = formData.image
-        const fileExt = file.name.split('.').pop()
-        const fileName = `${Date.now()}.${fileExt}`
-        const filePath = `product-images/${fileName}`
-
-        const { data: uploadData, error: uploadError } = await supabase
-          .storage
-          .from('product-images')
-          .upload(filePath, file)
-
-        if (uploadError) throw new Error(`图片上传失败: ${uploadError.message}`)
-
-        const { data: urlData } = supabase
-          .storage
-          .from('product-images')
-          .getPublicUrl(filePath)
-
-        imageUrl = urlData.publicUrl
-      }
-
-      // 3. 准备数据
-      const productData = {
-        name: String(formData.name).trim(),
-        category: formData.category,
-        original_price: formData.originalPrice ? Number(formData.originalPrice) : null,
-        current_price: Number(formData.currentPrice),
-        image_url: imageUrl || null,
-        recommendation: formData.recommendation ? String(formData.recommendation).trim() : null,
-        purchase_link: String(formData.purchaseLink).trim(),
-        inquiry_link: String(formData.inquiryLink).trim(),
-        updated_at: new Date().toISOString()
-      }
-
-      // 4. 数据库操作
-      let result
-      if (initialData?.id) {
-        console.log('准备更新商品:', initialData.id)
-        result = await updateProduct(initialData.id, productData)
-        console.log('更新结果:', result)
-      } else {
-        // 新增商品
-        const { data, error } = await supabase
-          .from('products')
-          .insert([productData])
-          .select()
-
-        if (error) throw error
-        if (!data || data.length === 0) throw new Error('新增商品失败')
-        result = data[0]
-      }
-
-      // 5. 成功处理
-      onSubmit(result)
-      onClose()
-    } catch (error) {
-      console.error('操作失败:', error)
-      const errorMessage = error.message || '操作失败，请重试'
-      toast.error(errorMessage)
-    } finally {
-      setIsLoading(false)
+      new URL(url)
+      return true
+    } catch (e) {
+      return false
     }
   }
 
-  const dataURLtoFile = (dataurl, filename) => {
-    const arr = dataurl.split(',')
-    const mime = arr[0].match(/:(.*?);/)[1]
-    const bstr = atob(arr[1])
-    let n = bstr.length
-    const u8arr = new Uint8Array(n)
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n)
-    }
-    return new File([u8arr], filename, { type: mime })
+  // 添加失去焦点处理函数
+  const handleBlur = (field) => () => {
+    validateField(field, formData[field])
   }
 
-  if (!isOpen) return null
+  // 添加输入变化处理函数
+  const handleInputChange = (e) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+    setErrors(prev => ({
+      ...prev,
+      [name]: null
+    }))
+  }
+
+  // 判断是否为导流商品模式
+  const isTrafficMode = mode === 'traffic'
+
+  // 修改图片源获取函数
+  const getImageSource = (data) => {
+    if (!data) return null
+    if (data.previewUrl) return data.previewUrl // 本地上传的预览
+    if (data.imageUrl) return cleanUrl(data.imageUrl) // URL输入的图片
+    if (data.image?.public_url) return cleanUrl(data.image.public_url) // 已上传的图片
+    return null
+  }
+
+  const getQCImageSource = (data) => {
+    if (!data) return null
+    if (data.qcPreviewUrl) return data.qcPreviewUrl // 本地上传的预览
+    if (data.qcImageUrl) return cleanUrl(data.qcImageUrl) // URL输入的图片
+    if (data.qc_image?.public_url) return cleanUrl(data.qc_image.public_url) // 已上传的图片
+    return null
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg w-full max-w-2xl p-6 relative" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
+      <div className="bg-white rounded-lg w-full max-w-2xl p-6 relative">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 p-2 text-gray-500 hover:text-gray-700"
@@ -225,26 +304,19 @@ export default function ProductModal({ isOpen, onClose, onSubmit, initialData })
         </button>
 
         <h2 className="text-xl font-bold mb-6">{initialData ? '编辑商品' : '新增商品'}</h2>
-        <form onSubmit={handleSubmit} className="space-y-4" style={{ maxHeight: 'calc(100vh - 10rem)', overflowY: 'auto' }}>
+        <form onSubmit={handleSubmit} className="space-y-4">
           {/* 商品名称 */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              商品名称<span className="text-red-500">*</span>
+              商品标题<span className="text-red-500">*</span>
             </label>
             <input
               type="text"
+              name="name"
               value={formData.name}
-              onChange={(e) => {
-                setFormData({ ...formData, name: e.target.value })
-                setErrors(prev => ({ ...prev, name: null }))
-              }}
+              onChange={handleInputChange}
               onBlur={handleBlur('name')}
-              style={{
-                height: '34px',
-                backgroundColor: '#f5f5f5',
-                boxShadow: 'inset 0 0 0 1px transparent'
-              }}
-              className={`mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black] ${
+              className={`mt-1 block w-full rounded-md px-3 h-[34px] bg-gray-50 focus:outline-none focus:ring-1 focus:ring-black ${
                 errors.name ? 'border-red-500' : ''
               }`}
             />
@@ -257,7 +329,16 @@ export default function ProductModal({ isOpen, onClose, onSubmit, initialData })
               商品分类<span className="text-red-500">*</span>
             </label>
             <div className="mt-1 grid grid-cols-2 gap-2">
-              {['Recommended', 'SHOES', 'JACKETS', 'PANTS', 'PEARLS', 'T-shirt'].map(cat => (
+              {[
+                'Shoes',
+                'Hoodies/Sweaters',
+                'T-Shirts',
+                'Jackets',
+                'Pants/Shorts',
+                'Headwear',
+                'Accessories',
+                'Other Stuff'
+              ].map(cat => (
                 <div
                   key={cat}
                   className={`flex items-center p-2 rounded-md cursor-pointer ${
@@ -278,169 +359,158 @@ export default function ProductModal({ isOpen, onClose, onSubmit, initialData })
               ))}
             </div>
             {errors.category && <p className="text-red-500 text-sm mt-1">{errors.category}</p>}
-            <p className="text-sm text-gray-500 mt-2">
-              • 选择 Recommended 分类的商品会显示在顶部推荐区域
-            </p>
           </div>
 
           {/* 价格 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">原价</label>
-              <input
-                type="number"
-                value={formData.originalPrice}
-                onChange={(e) => setFormData({ ...formData, originalPrice: e.target.value })}
-                style={{
-                  height: '34px',
-                  backgroundColor: '#f5f5f5',
-                  boxShadow: 'inset 0 0 0 1px transparent'
-                }}
-                className="mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black]"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                现价<span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                value={formData.currentPrice}
-                onChange={(e) => {
-                  setFormData({ ...formData, currentPrice: e.target.value })
-                  setErrors(prev => ({ ...prev, currentPrice: null }))
-                }}
-                onBlur={handleBlur('currentPrice')}
-                style={{
-                  height: '34px',
-                  backgroundColor: '#f5f5f5',
-                  boxShadow: 'inset 0 0 0 1px transparent'
-                }}
-                className={`mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black] ${
-                  errors.currentPrice ? 'border-red-500' : ''
-                }`}
-              />
-              {errors.currentPrice && <p className="text-red-500 text-sm mt-1">{errors.currentPrice}</p>}
-            </div>
-          </div>
-
-          {/* 图片上传 */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              商品图片
+              商品价格<span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              name="currentPrice"
+              value={formData.currentPrice}
+              onChange={handleInputChange}
+              onBlur={handleBlur('currentPrice')}
+              className={`mt-1 block w-full rounded-md px-3 h-[34px] bg-gray-50 focus:outline-none focus:ring-1 focus:ring-black ${
+                errors.currentPrice ? 'border-red-500' : ''
+              }`}
+            />
+            {errors.currentPrice && <p className="text-red-500 text-sm mt-1">{errors.currentPrice}</p>}
+          </div>
+
+          {/* 商品图片 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              商品图片<span className="text-red-500">*</span>
             </label>
             <div className="mt-1 flex flex-col space-y-2">
               <div className="flex items-center">
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={handleImageUpload}
+                  onChange={handleImageSelect}
                   className="hidden"
-                  id="image-upload"
+                  id="product-image-upload"
                 />
                 <label
-                  htmlFor="image-upload"
-                  className="cursor-pointer px-4 py-2 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-1 focus:ring-black"
+                  htmlFor="product-image-upload"
+                  className="cursor-pointer px-4 py-2 bg-gray-100 rounded-md hover:bg-gray-200"
                 >
                   选择图片
                 </label>
-                {(formData.previewUrl || initialData?.image_url) && (
-                  <img
-                    src={formData.previewUrl || initialData?.image_url}
-                    alt="预览"
-                    className="ml-4 w-20 h-20 object-cover rounded-md"
-                  />
-                )}
+                <input
+                  type="url"
+                  value={formData.imageUrl}
+                  onChange={(e) => setFormData(prev => ({ 
+                    ...prev, 
+                    imageUrl: e.target.value,
+                    // 清除文件上传的预览
+                    previewUrl: null
+                  }))}
+                  placeholder="或输入图片URL"
+                  className="ml-2 flex-1 px-3 h-[34px] bg-gray-50 rounded-md"
+                />
               </div>
+              {/* 图片预览 */}
+              {(formData.previewUrl || formData.imageUrl || initialData?.image?.public_url || initialData?.image_url) && (
+                <img
+                  src={getImageSource(formData) || getImageSource(initialData)}
+                  alt="预览"
+                  className="mt-2 w-20 h-20 object-cover rounded-md"
+                  onError={(e) => {
+                    e.target.onerror = null
+                    e.target.src = '/placeholder-image.jpg'
+                  }}
+                />
+              )}
               <div className="text-sm text-gray-500">
-                <p>• 支持 jpg、png 格式</p>
+                <p>• 支持图片上传或URL链接</p>
+                <p>• 上传图片支持 jpg、png 格式</p>
                 <p>• 图片大小不能超过 5MB</p>
                 <p>• 建议尺寸：1024×1024px</p>
-                <p>• 大图片将自动压缩以提高上传速度</p>
               </div>
             </div>
           </div>
 
-          {/* 推荐信息 */}
+          {/* QC图片 */}
           <div>
-            <label className="block text-sm font-medium text-gray-700">推荐信息</label>
-            <textarea
-              value={formData.recommendation}
-              onChange={(e) => setFormData({ ...formData, recommendation: e.target.value })}
-              style={{
-                height: '72px',
-                backgroundColor: '#f5f5f5',
-                boxShadow: 'inset 0 0 0 1px transparent'
-              }}
-              className="mt-1 block w-full rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black]"
-              rows="3"
+            <label className="block text-sm font-medium text-gray-700">
+              QC图片<span className="text-red-500">*</span>
+            </label>
+            <div className="mt-1 flex flex-col space-y-2">
+              <div className="flex items-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleQCImageSelect}
+                  className="hidden"
+                  id="qc-image-upload"
+                />
+                <label
+                  htmlFor="qc-image-upload"
+                  className="cursor-pointer px-4 py-2 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  选择图片
+                </label>
+                <input
+                  type="url"
+                  value={formData.qcImageUrl}
+                  onChange={(e) => setFormData(prev => ({ 
+                    ...prev, 
+                    qcImageUrl: e.target.value,
+                    // 清除文件上传的预览
+                    qcPreviewUrl: null
+                  }))}
+                  placeholder="或输入图片URL"
+                  className="ml-2 flex-1 px-3 h-[34px] bg-gray-50 rounded-md"
+                />
+              </div>
+              {/* QC图片预览 */}
+              {(formData.qcPreviewUrl || formData.qcImageUrl || initialData?.qc_image?.public_url || initialData?.qc_image_url) && (
+                <img
+                  src={getQCImageSource(formData) || getQCImageSource(initialData)}
+                  alt="QC预览"
+                  className="mt-2 w-20 h-20 object-cover rounded-md"
+                  onError={(e) => {
+                    e.target.onerror = null
+                    e.target.src = '/placeholder-image.jpg'
+                  }}
+                />
+              )}
+              <div className="text-sm text-gray-500">
+                <p>• 支持图片上传或URL链接</p>
+                <p>• 上传图片支持 jpg、png 格式</p>
+                <p>• 图片大小不能超过 5MB</p>
+                <p>• 建议尺寸：1024×1024px</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 购买链接 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              购买链接<span className="text-red-500">*</span>
+            </label>
+            <input
+              type="url"
+              name="purchaseLink"
+              value={formData.purchaseLink}
+              onChange={handleInputChange}
+              onBlur={handleBlur('purchaseLink')}
+              className={`mt-1 block w-full rounded-md px-3 h-[34px] bg-gray-50 focus:outline-none focus:ring-1 focus:ring-black ${
+                errors.purchaseLink ? 'border-red-500' : ''
+              }`}
             />
-            <p className="text-sm text-gray-500 mt-2">
-              • 只有商品分类为 Recommended 时，推荐信息才会展示
-            </p>
+            {errors.purchaseLink && <p className="text-red-500 text-sm mt-1">{errors.purchaseLink}</p>}
           </div>
 
-          {/* 链接 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                购买链接<span className="text-red-500">*</span>
-              </label>
-              <input
-                type="url"
-                value={formData.purchaseLink}
-                onChange={(e) => {
-                  setFormData({ ...formData, purchaseLink: e.target.value })
-                  setErrors(prev => ({ ...prev, purchaseLink: null }))
-                }}
-                onBlur={handleBlur('purchaseLink')}
-                style={{
-                  height: '34px',
-                  backgroundColor: '#f5f5f5',
-                  boxShadow: 'inset 0 0 0 1px transparent'
-                }}
-                className={`mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black] ${
-                  errors.purchaseLink ? 'border-red-500' : ''
-                }`}
-              />
-              {errors.purchaseLink && <p className="text-red-500 text-sm mt-1">{errors.purchaseLink}</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                咨询链接<span className="text-red-500">*</span>
-              </label>
-              <input
-                type="url"
-                value={formData.inquiryLink}
-                onChange={(e) => {
-                  setFormData({ ...formData, inquiryLink: e.target.value })
-                  setErrors(prev => ({ ...prev, inquiryLink: null }))
-                }}
-                onBlur={handleBlur('inquiryLink')}
-                style={{
-                  height: '34px',
-                  backgroundColor: '#f5f5f5',
-                  boxShadow: 'inset 0 0 0 1px transparent'
-                }}
-                className={`mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black] ${
-                  errors.inquiryLink ? 'border-red-500' : ''
-                }`}
-              />
-              {errors.inquiryLink && <p className="text-red-500 text-sm mt-1">{errors.inquiryLink}</p>}
-            </div>
-          </div>
-
-          {/* 操作按钮 */}
+          {/* 保存按钮 */}
           <div className="mt-6">
             <button
               type="submit"
               disabled={isLoading}
-              style={{
-                height: '40px',
-                backgroundColor: '#000',
-                color: '#fff'
-              }}
-              className="w-full rounded-md font-medium hover:bg-gray-800 transition-colors focus:outline-none focus:ring-1 focus:ring-black focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full h-[40px] bg-black text-white rounded-md font-medium hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? '保存中...' : (initialData ? '保存更改' : '保存')}
             </button>
