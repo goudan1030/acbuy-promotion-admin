@@ -3,21 +3,24 @@ import { toast } from 'react-toastify'
 import { supabase } from '../lib/supabaseClient'  // 修正后的路径
 import 'react-toastify/dist/ReactToastify.css'
 import imageCompression from 'browser-image-compression'  // 添加导入
+import { uploadImage, deleteImage } from '../services/imageService'
 
 
 export default function CampaignProductModal({ isOpen, onClose, onSubmit, initialData }) {
   const [formData, setFormData] = useState({
     name: '',
-    description: '',
     price: '',
     originalPrice: '',
-    image: null,
+    imageId: null,
     previewUrl: null,
-    purchaseLink: initialData?.purchaseLink || '',  // 修改字段名
-    inquiryLink: initialData?.inquiryLink || '',    // 修改字段名
+    purchaseLink: '',
+    inquiryLink: '',
     is_recommended: false
   })
 
+  // 新增：临时文件状态
+  const [selectedFile, setSelectedFile] = useState(null)
+  
   // 修复：统一处理输入变化
   const handleInputChange = (e) => {
     const { name, value } = e.target
@@ -79,37 +82,26 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
     if (initialData) {
       setFormData({
         name: initialData.name || '',
-        originalPrice: initialData.original_price || '',
         price: initialData.price || '',
-        image: null,
-        previewUrl: initialData.image_url || null,
+        originalPrice: initialData.original_price || '',
+        imageId: initialData.image_id || null,
+        previewUrl: initialData.image?.public_url || null,
         purchaseLink: initialData.purchase_link || '',
         inquiryLink: initialData.inquiry_link || '',
         is_recommended: initialData.is_recommended || false
       })
-      setPreviewImage(initialData.image_url)
-    } else {
-      setFormData({
-        name: '',
-        originalPrice: '',
-        price: '',
-        image: null,
-        previewUrl: null,
-        purchaseLink: '',
-        inquiryLink: '',
-        is_recommended: false
-      })
-      setPreviewImage(null)
+      // 清除之前可能存在的临时文件
+      setSelectedFile(null)
     }
-    setErrors({})
-  }, [initialData, isOpen])
+  }, [initialData])
 
   // 添加图片压缩函数
   const compressImage = async (file) => {
     const options = {
       maxSizeMB: 1,
       maxWidthOrHeight: 1024,
-      useWebWorker: true
+      useWebWorker: true,
+      fileType: file.type
     }
     
     try {
@@ -117,7 +109,7 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
       return compressedFile
     } catch (error) {
       console.error('图片压缩失败:', error)
-      throw new Error('图片压缩失败')
+      throw new Error('图片压缩失败，请重试')
     }
   }
 
@@ -127,39 +119,33 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
   // 添加本地预览图片状态
   const [previewImage, setPreviewImage] = useState(null)
 
-  // 修改图片上传处理函数
-  const handleImageUpload = async (e) => {
+  // 修改图片选择处理函数
+  const handleImageSelect = (e) => {
     const file = e.target.files[0]
-    if (file) {
-      try {
-        // 检查文件大小
-        if (file.size > MAX_FILE_SIZE) {
-          toast.error('图片大小不能超过5MB')
-          e.target.value = ''
-          return
-        }
+    if (!file) return
 
-        // 创建本地预览
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const previewUrl = reader.result
-          setPreviewImage(previewUrl)
-          setFormData(prev => ({
-            ...prev,
-            image: file,
-            previewUrl: previewUrl
-          }))
-        }
-        reader.readAsDataURL(file)
-        
-        setErrors(prev => ({ ...prev, image: null }))
-      } catch (error) {
-        toast.error(error.message || '图片处理失败')
-        e.target.value = ''
-      }
+    // 检查文件大小
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('图片大小不能超过5MB')
+      return
     }
+
+    // 检查文件类型
+    if (!file.type.startsWith('image/')) {
+      toast.error('请上传图片文件')
+      return
+    }
+
+    // 创建本地预览URL
+    const previewUrl = URL.createObjectURL(file)
+    
+    // 保存文件和更新预览
+    setSelectedFile(file)
+    setFormData(prev => ({
+      ...prev,
+      previewUrl: previewUrl
+    }))
   }
-  
 
   const validateField = (field, value) => {
     if (!value || (field === 'price' && isNaN(value))) {
@@ -180,57 +166,98 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    
+    // 表单验证
+    const errors = {}
+    if (!formData.name?.trim()) errors.name = '请输入商品名称'
+    if (!formData.price) errors.price = '请输入商品现价'
+    
+    if (Object.keys(errors).length > 0) {
+      setErrors(errors)
+      return
+    }
+
     setIsLoading(true)
+    const toastId = toast.loading('正在保存...', {
+      position: 'top-center'
+    })
 
     try {
-      // 验证必填字段...
+      let imageId = formData.imageId
+      console.log('开始处理表单提交，当前图片ID:', imageId) // 调试信息
+      console.log('是否有新选择的图片:', !!selectedFile) // 调试信息
 
-      // 处理图片上传
-      let imageUrl = formData.image
-      if (formData.image && formData.image instanceof File) {
+      // 如果有新选择的图片，先上传图片
+      if (selectedFile) {
         try {
-          // 压缩图片
-          const compressedFile = await compressImage(formData.image)
+          console.log('开始处理新图片上传') // 调试信息
           
-          // 上传到 Supabase Storage
-          const fileExt = formData.image.name.split('.').pop()
-          const fileName = `${Date.now()}.${fileExt}`
-          const filePath = `campaign-images/${fileName}`
+          // 压缩图片
+          const compressedFile = await compressImage(selectedFile)
+          console.log('图片压缩完成，开始上传') // 调试信息
+          
+          // 上传图片并获取图片记录
+          const imageData = await uploadImage(compressedFile)
+          console.log('新图片上传成功:', imageData) // 调试信息
+          
+          imageId = imageData.id
 
-          const { error: uploadError } = await supabase.storage
-            .from('campaign-images')
-            .upload(filePath, compressedFile)
-
-          if (uploadError) throw uploadError
-
-          // 获取公共URL
-          const { data: { publicUrl } } = supabase.storage
-            .from('campaign-images')
-            .getPublicUrl(filePath)
-
-          imageUrl = publicUrl
+          // 如果有旧图片，删除它
+          if (formData.imageId) {
+            console.log('准备删除旧图片:', formData.imageId) // 调试信息
+            await deleteImage(formData.imageId).catch(error => {
+              console.error('删除旧图片失败:', error)
+              // 继续执行，不中断保存流程
+            })
+          }
         } catch (error) {
-          throw new Error(`图片上传失败: ${error.message}`)
+          console.error('图片处理详细错误:', error) // 调试信息
+          toast.update(toastId, {
+            render: `图片处理失败: ${error.message}`,
+            type: 'error',
+            isLoading: false,
+            autoClose: 3000
+          })
+          setIsLoading(false)
+          return
         }
       }
 
-      // 准备提交数据
       const productData = {
-        name: String(formData.name).trim(),
-        price: parseFloat(formData.price),
-        original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
-        image_url: imageUrl,
-        purchase_link: String(formData.purchaseLink).trim(),
-        inquiry_link: String(formData.inquiryLink).trim(),
-        is_recommended: formData.is_recommended,
-        created_at: new Date().toISOString()
+        name: formData.name.trim(),
+        price: formData.price,
+        original_price: formData.originalPrice || null,
+        image_id: imageId,
+        purchase_link: formData.purchaseLink?.trim() || null,
+        inquiry_link: formData.inquiryLink?.trim() || null,
+        is_recommended: formData.is_recommended || false
       }
 
-      // 提交数据
-      onSubmit(productData)
+      console.log('准备提交的商品数据:', productData) // 调试信息
+
+      await onSubmit(productData)
+      
+      toast.update(toastId, {
+        render: '保存成功',
+        type: 'success',
+        isLoading: false,
+        autoClose: 2000
+      })
+
+      // 清理临时文件
+      if (selectedFile && formData.previewUrl) {
+        URL.revokeObjectURL(formData.previewUrl)
+      }
+      
+      onClose()
     } catch (error) {
-      console.error('保存失败:', error)
-      toast.error(error.message || '操作失败，请重试')
+      console.error('保存失败详细错误:', error) // 调试信息
+      toast.update(toastId, {
+        render: `保存失败: ${error.message}`,
+        type: 'error',
+        isLoading: false,
+        autoClose: 3000
+      })
     } finally {
       setIsLoading(false)
     }
@@ -248,6 +275,16 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
     }
     return new File([u8arr], filename, { type: mime })
   }
+
+  // 清理函数
+  useEffect(() => {
+    return () => {
+      // 组件卸载时清理临时预览URL
+      if (formData.previewUrl && !formData.imageId) {
+        URL.revokeObjectURL(formData.previewUrl)
+      }
+    }
+  }, [formData.previewUrl, formData.imageId])
 
   if (!isOpen) return null
 
@@ -356,7 +393,7 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={handleImageUpload}
+                  onChange={handleImageSelect}
                   className="hidden"
                   id="campaign-image-upload"
                 />
@@ -366,9 +403,9 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
                 >
                   选择图片
                 </label>
-                {(formData.previewUrl || initialData?.image_url) && (
+                {(formData.previewUrl || (initialData?.image?.public_url && !selectedFile)) && (
                   <img
-                    src={formData.previewUrl || initialData?.image_url}
+                    src={formData.previewUrl || initialData?.image?.public_url}
                     alt="预览"
                     className="ml-4 w-20 h-20 object-cover rounded-md"
                   />
@@ -392,8 +429,8 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
               </label>
               <input
                 type="url"
-                name="purchaseLink"  // 修改字段名
-                value={formData.purchase_link}
+                name="purchaseLink"
+                value={formData.purchaseLink}
                 onChange={handleInputChange}
                 onBlur={handleBlur('purchaseLink')}
                 style={{
@@ -402,12 +439,10 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
                   boxShadow: 'inset 0 0 0 1px transparent'
                 }}
                 className={`mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black] ${
-                  errors.purchase_link ? 'border-red-500' : ''
+                  errors.purchaseLink ? 'border-red-500' : ''
                 }`}
               />
-              {errors.purchase_link && (
-                <p className="text-red-500 text-sm mt-1">{errors.purchase_link}</p>
-              )}
+              {errors.purchaseLink && <p className="text-red-500 text-sm mt-1">{errors.purchaseLink}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">
@@ -416,7 +451,7 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
               <input
                 type="url"
                 name="inquiryLink"
-                value={formData.inquiry_link}
+                value={formData.inquiryLink}
                 onChange={handleInputChange}
                 onBlur={handleBlur('inquiryLink')}
                 style={{
@@ -425,12 +460,10 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
                   boxShadow: 'inset 0 0 0 1px transparent'
                 }}
                 className={`mt-1 block w-full rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-black focus:shadow-[inset_0_0_0_1px_black] ${
-                  errors.inquiry_link ? 'border-red-500' : ''
+                  errors.inquiryLink ? 'border-red-500' : ''
                 }`}
               />
-              {errors.inquiry_link && (
-                <p className="text-red-500 text-sm mt-1">{errors.inquiry_link}</p>
-              )}
+              {errors.inquiryLink && <p className="text-red-500 text-sm mt-1">{errors.inquiryLink}</p>}
             </div>
           </div>
 
@@ -453,122 +486,4 @@ export default function CampaignProductModal({ isOpen, onClose, onSubmit, initia
       </div>
     </div>
   )
-}
-// 新增商品操作
-const handleCreateProduct = async (productData) => {
-  const { data, error } = await supabase
-    .from('campaign_products')
-    .insert([productData])
-    .select('*')
-  
-  if (error) throw new Error(`新增失败: ${error.message}`)
-  if (!data || data.length === 0) throw new Error('新增成功但未返回数据')
-  return data[0]
-}
-
-
-const handleUpdateProduct = async (productData, productId) => {
-  try {
-    console.log('开始更新商品操作')
-    console.log('商品ID:', productId)
-    console.log('更新数据:', JSON.stringify(productData, null, 2))
-
-    // 获取当前商品数据
-    const { data: currentData, error: fetchError } = await supabase
-      .from('campaign_products')
-      .select('*')
-      .eq('id', productId)
-      .single()
-
-    if (fetchError) {
-      console.error('获取当前商品数据失败:', fetchError)
-      throw new Error(`获取当前商品数据失败: ${fetchError.message}`)
-    }
-
-    // 比较并生成更新数据
-    const updatedFields = {}
-    for (const key in productData) {
-      if (productData[key] !== currentData[key]) {
-        updatedFields[key] = productData[key]
-      }
-    }
-
-    // 如果没有字段被修改
-    if (Object.keys(updatedFields).length === 0) {
-      console.log('没有字段被修改，跳过更新')
-      return currentData
-    }
-
-    // 添加更新时间戳
-    updatedFields.updated_at = new Date().toISOString()
-
-    console.log('实际更新的字段:', JSON.stringify(updatedFields, null, 2))
-
-    // 执行更新操作
-    console.log('正在执行数据库更新...')
-    const { data, error } = await supabase
-      .from('campaign_products')
-      .update(updatedFields)
-      .eq('id', productId)
-      .select()
-      .single()
-
-    console.log('数据库更新完成')
-    console.log('返回数据:', JSON.stringify(data, null, 2))
-    console.log('返回错误:', error)
-
-    if (error) {
-      console.error('数据库更新失败:', error)
-      throw new Error(`更新失败: ${error.message}`)
-    }
-
-    if (!data) {
-      console.error('数据库更新成功但未返回有效数据')
-      throw new Error('更新成功但未返回有效数据')
-    }
-
-    console.log('更新成功，返回数据:', JSON.stringify(data, null, 2))
-    return data
-  } catch (error) {
-    console.error('更新商品失败:', error)
-    throw error
-  }
-}
-
-const handleSubmit = async (e) => {
-  e.preventDefault()
-  
-  try {
-    // 准备数据
-    const productData = {
-      name: String(formData.name).trim(),
-      description: formData.description ? String(formData.description).trim() : null,
-      price: parseFloat(formData.price),  // 使用 price 而不是 current_price
-      original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
-      image_url: formData.image,
-      purchase_link: String(formData.purchase_link).trim(),
-      inquiry_link: String(formData.inquiry_link).trim(),
-      is_recommended: formData.is_recommended,
-      created_at: new Date().toISOString()
-    }
-
-    console.log('准备提交的数据:', productData)
-
-    // 数据库操作
-    const { data, error } = await supabase
-      .from('campaign_products')
-      .insert([productData])
-      .select('*')
-
-    if (error) throw error
-    if (!data || data.length === 0) throw new Error('操作成功但未返回数据')
-
-    toast.success('商品添加成功')
-    onSubmit(data[0])
-  } catch (error) {
-    console.error('保存失败:', error)
-    toast.error(`保存失败: ${error.message}`)
-  } finally {
-    setIsLoading(false)
-  }
 }

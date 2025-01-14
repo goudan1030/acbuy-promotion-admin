@@ -3,6 +3,7 @@ import { getProducts, getProductsByCategory, deleteProduct, getCategories } from
 import { ToastContainer, toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import ProductModal from '../components/ProductModal'
+import { supabase } from '../lib/supabaseClient'
 
 export default function Category() {
   const [products, setProducts] = useState([])
@@ -86,32 +87,84 @@ export default function Category() {
   const handleProductUpdate = async (updatedProduct) => {
     try {
       setLoading(true)
+      console.log('开始更新商品，更新数据:', updatedProduct) // 调试信息
+
+      const toastId = toast.loading('正在更新商品...', {
+        position: 'top-center'
+      })
+
+      if (editingProduct?.id) {
+        console.log('更新现有商品，ID:', editingProduct.id) // 调试信息
+        
+        // 更新现有商品
+        const { data, error } = await supabase
+          .from('products')
+          .update({
+            name: updatedProduct.name,
+            category: updatedProduct.category,
+            current_price: updatedProduct.current_price,
+            original_price: updatedProduct.original_price,
+            image_id: updatedProduct.image_id,
+            recommendation: updatedProduct.recommendation,
+            purchase_link: updatedProduct.purchase_link,
+            inquiry_link: updatedProduct.inquiry_link,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingProduct.id)
+          .select(`
+            *,
+            image:image_id (
+              id,
+              public_url
+            )
+          `)
+          .single()
+
+        if (error) {
+          console.error('数据库更新错误:', error) // 调试信息
+          throw error
+        }
+        
+        console.log('更新成功，返回数据:', data) // 调试信息
+      }
+
       // 刷新商品列表
       const data = selectedCategory === 'all' 
         ? await getProducts()
         : await getProductsByCategory(selectedCategory)
       
       setProducts(data)
-      toast.success('商品更新成功')
-    } catch (error) {
-      console.error('更新商品列表失败:', error)
-      toast.error('更新商品列表失败')
-    } finally {
-      setLoading(false)
+      
+      toast.update(toastId, {
+        render: '商品更新成功',
+        type: 'success',
+        isLoading: false,
+        autoClose: 2000
+      })
+
       setIsModalOpen(false)
       setEditingProduct(null)
+    } catch (error) {
+      console.error('更新商品失败:', error)
+      toast.error(`更新失败: ${error.message}`, {
+        position: 'top-center',
+        duration: 5000
+      })
+    } finally {
+      setLoading(false)
     }
   }
 
   const handleEdit = (product) => {
-    console.log('开始编辑商品:', product)
+    console.log('开始编辑商品，原始数据:', product) // 调试信息
     setEditingProduct({
-      id: product.id,  // 确保包含 id
+      id: product.id,
       name: product.name || '',
       category: product.category || '',
       original_price: product.original_price || '',
       current_price: product.current_price || '',
-      image_url: product.image_url || null,
+      image_id: product.image_id || null,  // 添加 image_id
+      image: product.image || null,        // 添加完整的 image 对象
       recommendation: product.recommendation || '',
       purchase_link: product.purchase_link || '',
       inquiry_link: product.inquiry_link || ''
@@ -201,16 +254,19 @@ export default function Category() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {currentItems.map(product => (
+                    {products.map(product => (
                       <tr key={product.id} className="hover:bg-gray-50">
-                        <td className="px-6 h-16">
-                          {product.image_url && (
-                            <img
-                              src={product.image_url}
-                              alt={product.name}
-                              className="w-12 h-12 object-cover rounded"
-                            />
-                          )}
+                        <td className="px-6 py-4">
+                          <div className="flex items-center">
+                            {product.image && (
+                              <img
+                                src={product.image.public_url}
+                                alt={product.name}
+                                className="w-12 h-12 object-cover rounded-md mr-3"
+                              />
+                            )}
+                            <span>{product.name}</span>
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900">{product.name}</td>
                         <td className="px-6 py-4 text-sm text-gray-500">{product.category}</td>

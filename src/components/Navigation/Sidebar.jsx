@@ -8,7 +8,8 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   CodeBracketIcon,
-  DevicePhoneMobileIcon
+  DevicePhoneMobileIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline'
 
 export default function Sidebar() {
@@ -44,6 +45,11 @@ export default function Sidebar() {
       name: '类目管理', 
       path: '/admin/category',
       icon: <FolderIcon className="w-5 h-5" />
+    },
+    { 
+      name: '导流商品', 
+      path: '/admin/traffic',
+      icon: <ArrowPathIcon className="w-5 h-5" />
     }
   ]
 

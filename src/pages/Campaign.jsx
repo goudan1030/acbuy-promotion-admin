@@ -15,20 +15,30 @@ export default function Campaign() {
   // 获取投放商品
   const getCampaignProducts = async () => {
     setLoading(true)
+    console.log('开始获取商品列表') // 调试信息
+    
     try {
       const { data, error } = await supabase
         .from('campaign_products')
-        .select('*')
+        .select(`
+          *,
+          image:image_id (
+            id,
+            public_url
+          )
+        `)
         .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (error) {
+        console.error('获取商品列表错误:', error) // 调试信息
+        throw error
+      }
+
+      console.log('获取到的商品列表:', data) // 调试信息
       setProducts(data)
     } catch (error) {
       console.error('获取投放商品失败:', error)
-      toast.error('获取投放商品失败', {
-        position: 'top-center',
-        duration: 4000
-      })
+      toast.error('获取投放商品失败')
     } finally {
       setLoading(false)
     }
@@ -83,28 +93,44 @@ export default function Campaign() {
   const handleProductUpdate = async (updatedProduct) => {
     try {
       setLoading(true)
-      toast.loading('正在更新商品...', {
-        position: 'top-center',
-        duration: 2000
+      console.log('开始更新商品，更新数据:', updatedProduct) // 调试信息
+
+      const toastId = toast.loading('正在更新商品...', {
+        position: 'top-center'
       })
 
       if (editingProduct?.id) {
+        console.log('更新现有商品，ID:', editingProduct.id) // 调试信息
+        
         // 更新现有商品
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('campaign_products')
           .update({
             name: updatedProduct.name,
             price: updatedProduct.price,
             original_price: updatedProduct.original_price,
-            image_url: updatedProduct.image_url,
+            image_id: updatedProduct.image_id, // 使用 image_id 而不是 image_url
             purchase_link: updatedProduct.purchase_link,
             inquiry_link: updatedProduct.inquiry_link,
             is_recommended: updatedProduct.is_recommended,
             updated_at: new Date().toISOString()
           })
           .eq('id', editingProduct.id)
+          .select(`
+            *,
+            image:image_id (
+              id,
+              public_url
+            )
+          `)
+          .single()
 
-        if (error) throw error
+        if (error) {
+          console.error('数据库更新错误:', error) // 调试信息
+          throw error
+        }
+        
+        console.log('更新成功，返回数据:', data) // 调试信息
       } else {
         // 新增商品
         const { error } = await supabase
@@ -120,9 +146,11 @@ export default function Campaign() {
       // 刷新商品列表
       await getCampaignProducts()
       
-      toast.success(`商品${editingProduct ? '更新' : '添加'}成功`, {
-        position: 'top-center',
-        duration: 4000
+      toast.update(toastId, {
+        render: `商品${editingProduct ? '更新' : '添加'}成功`,
+        type: 'success',
+        isLoading: false,
+        autoClose: 2000
       })
       
       // 关闭模态框
@@ -136,22 +164,21 @@ export default function Campaign() {
       })
     } finally {
       setLoading(false)
-      toast.dismiss()
     }
   }
 
-  // 修改编辑处理函数，确保所有必要字段都被正确传递
+  // 修改编辑处理函数
   const handleEdit = (product) => {
     setEditingProduct({
       id: product.id,
       name: product.name || '',
       price: product.price || '',
       original_price: product.original_price || '',
-      image_url: product.image_url || null,
+      image_id: product.image_id || null,
+      image: product.image || null,
       purchase_link: product.purchase_link || '',
       inquiry_link: product.inquiry_link || '',
-      is_recommended: product.is_recommended || false,
-      description: product.description || '' // 如果有描述字段的话
+      is_recommended: product.is_recommended || false
     })
     setIsModalOpen(true)
   }
@@ -188,11 +215,11 @@ export default function Campaign() {
                   <tr key={product.id} className="border-b">
                     <td className="px-6 py-4 text-sm">
                       <div className="flex items-center">
-                        {product.image_url && (
+                        {product.image && (
                           <img
-                            src={product.image_url}
+                            src={product.image.public_url}
                             alt={product.name}
-                            className="w-12 h-12 object-cover rounded mr-3"
+                            className="w-12 h-12 object-cover rounded-md mr-3"
                           />
                         )}
                         <div>

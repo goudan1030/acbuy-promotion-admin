@@ -5,13 +5,19 @@ export const getProducts = async () => {
   try {
     const { data, error } = await supabase
       .from('products')
-      .select('*')
+      .select(`
+        *,
+        image:image_id (
+          id,
+          public_url
+        )
+      `)
       .order('created_at', { ascending: false })
 
     if (error) throw error
     return data
   } catch (error) {
-    console.error('获取商品失败:', error)
+    console.error('获取商品列表失败:', error)
     throw error
   }
 }
@@ -89,50 +95,36 @@ export const deleteProduct = async (productId) => {
 // 更新商品
 export const updateProduct = async (productId, productData) => {
   try {
-    console.log('开始更新商品:', { productId, productData })
-
-    // 1. 先检查商品是否存在
-    const { data: existingProduct, error: checkError } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', productId)
-
-    if (checkError) {
-      console.error('检查商品失败:', checkError)
-      throw new Error(`检查商品失败: ${checkError.message}`)
-    }
-
-    if (!existingProduct || existingProduct.length === 0) {
-      throw new Error(`商品不存在: ${productId}`)
-    }
-
-    console.log('找到现有商品:', existingProduct[0])
-
-    // 2. 执行更新
+    // 构建更新数据
     const updatePayload = {
-      ...productData,
+      name: productData.name,
+      current_price: productData.current_price,
+      original_price: productData.original_price,
+      category: productData.category,
+      description: productData.description,
       updated_at: new Date().toISOString()
     }
 
-    console.log('更新数据:', updatePayload)
+    // 如果有新的图片ID，添加到更新数据中
+    if (productData.image_id) {
+      updatePayload.image_id = productData.image_id
+    }
 
     const { data, error } = await supabase
       .from('products')
       .update(updatePayload)
       .eq('id', productId)
-      .select()
+      .select(`
+        *,
+        image:image_id (
+          id,
+          public_url
+        )
+      `)
+      .single()
 
-    if (error) {
-      console.error('更新失败:', error)
-      throw new Error(`更新失败: ${error.message}`)
-    }
-
-    if (!data || data.length === 0) {
-      throw new Error('更新后未返回数据')
-    }
-
-    console.log('更新成功:', data[0])
-    return data[0]
+    if (error) throw error
+    return data
   } catch (error) {
     console.error('更新商品失败:', error)
     throw error

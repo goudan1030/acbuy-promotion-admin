@@ -8,6 +8,7 @@ import Category from '../pages/Category'
 import Admin from '../pages/Admin'
 import TrackingCode from '../pages/TrackingCode'
 import AppDownload from '../pages/AppDownload'
+import Traffic from '../pages/Traffic'
 
 const router = createBrowserRouter([
   {
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
       { path: 'dashboard', element: <Dashboard /> },
       { path: 'campaign', element: <Campaign /> },
       { path: 'category', element: <Category /> },
+      { path: 'traffic', element: <Traffic /> },
       { path: 'admin', element: <Admin /> },
       { path: 'tracking-code', element: <TrackingCode /> },
       { path: 'app-download', element: <AppDownload /> }
