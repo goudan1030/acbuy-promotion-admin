@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { toast } from 'react-toastify'
 import ProductModal from '../components/ProductModal'
+import ImportModal from '../components/ImportModal'
 
 export default function Traffic() {
   const [products, setProducts] = useState([])
@@ -10,6 +11,7 @@ export default function Traffic() {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
   const [editingProduct, setEditingProduct] = useState(null)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
 
   // 获取导流商品
   const getTrafficProducts = async () => {
@@ -180,13 +182,22 @@ export default function Traffic() {
           {/* 标题和新增按钮 */}
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold">导流商品管理</h1>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="h-[34px] flex items-center bg-black text-white font-bold px-4 rounded hover:bg-gray-800"
-              style={{ fontSize: '14px' }}
-            >
-              新增导流商品
-            </button>
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="h-[34px] flex items-center bg-white border border-gray-300 text-gray-700 font-bold px-4 rounded hover:bg-gray-50"
+                style={{ fontSize: '14px' }}
+              >
+                导入商品
+              </button>
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="h-[34px] flex items-center bg-black text-white font-bold px-4 rounded hover:bg-gray-800"
+                style={{ fontSize: '14px' }}
+              >
+                新增导流商品
+              </button>
+            </div>
           </div>
 
           {/* 商品列表 */}
@@ -286,6 +297,15 @@ export default function Traffic() {
           onSubmit={handleProductUpdate}
           initialData={editingProduct}
           mode="traffic"
+        />
+      )}
+
+      {/* 添加导入模态框 */}
+      {isImportModalOpen && (
+        <ImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          onSuccess={getTrafficProducts}
         />
       )}
     </div>
